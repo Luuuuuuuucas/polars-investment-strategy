@@ -1,0 +1,21 @@
+# Virtual environment
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Generated market data
+data/raw/
+
+# Temporary local files
+test.csv
+
+# Python package build metadata
+*.egg-info/
