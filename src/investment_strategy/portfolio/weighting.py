@@ -4,20 +4,20 @@ from typing import Literal
 
 
 def calculate_equal_weight(
-    sorted_filtered_signal_df: pl.DataFrame,
+    filtered_signal_df: pl.DataFrame,
     *,
     group_col: str = "rebalance_date",
 ) -> pl.DataFrame:
     """
     A helper function for construct_portfolio_weights.
     """
-    return sorted_filtered_signal_df.with_columns(
+    return filtered_signal_df.with_columns(
         (1 / pl.len().over(group_col)).alias("portfolio_weight")
     )
 
 
 def calculate_signal_weight(
-    sorted_filtered_signal_df: pl.DataFrame,
+    filtered_signal_df: pl.DataFrame,
     signal_col: str,
     *,
     group_col: str = "rebalance_date",
@@ -25,7 +25,7 @@ def calculate_signal_weight(
     """
     A helper function for construct_portfolio_weights.
     """
-    return sorted_filtered_signal_df.with_columns(
+    return filtered_signal_df.with_columns(
         (col(signal_col) / col(signal_col).sum().over(group_col)).alias(
             "portfolio_weight"
         )
@@ -33,7 +33,7 @@ def calculate_signal_weight(
 
 
 def construct_portfolio_weights(
-    sorted_filtered_signal_df: pl.DataFrame,
+    filtered_signal_df: pl.DataFrame,
     weighting_method: Literal[
         "equal_weighted",
         "signal_weighted",
@@ -44,7 +44,7 @@ def construct_portfolio_weights(
 ) -> pl.DataFrame:
     if weighting_method == "equal_weighted":
         return calculate_equal_weight(
-            sorted_filtered_signal_df,
+            filtered_signal_df,
             group_col=group_col,
         )
 
@@ -55,7 +55,7 @@ def construct_portfolio_weights(
             )
 
         return calculate_signal_weight(
-            sorted_filtered_signal_df,
+            filtered_signal_df,
             signal_col,
             group_col=group_col,
         )

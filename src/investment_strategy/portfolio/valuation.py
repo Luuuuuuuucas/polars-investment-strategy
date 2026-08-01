@@ -22,7 +22,7 @@ def get_next_date_matched_rebalance_level_table(
     """
     Creates a filtered close prices dataset, which will be used in get_daily_position_value_table and get_daily_portfolio_table.
     """
-    return rebalance_level_table.sort("rebalance_date").with_columns(
+    return rebalance_level_table.with_columns(
         col("rebalance_date").shift(-1).alias("next_rebalance_date")
     )
 
@@ -72,9 +72,8 @@ def get_daily_portfolio_table(
         daily_position_value_table.select(
             col("date"), col("position_value").alias("positions_value")
         )
-        .group_by("date")
+        .group_by("date", maintain_order=True)
         .sum()
-        .sort("date")
     )
 
     return (

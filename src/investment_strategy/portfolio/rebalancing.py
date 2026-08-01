@@ -4,12 +4,12 @@ from datetime import date
 
 
 def prepare_rebalance_allocation_df(
-    sorted_filtered_signal_df: pl.DataFrame,
+    filtered_signal_df: pl.DataFrame,
 ) -> pl.DataFrame:
     """
     Generates rebalance_allocation_df, which will be used as an input for portfolio calculations.
     """
-    return sorted_filtered_signal_df.select(
+    return filtered_signal_df.select(
         col("rebalance_date"),
         col("ticker"),
         col("rebalance_open"),

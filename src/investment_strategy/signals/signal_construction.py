@@ -17,7 +17,7 @@ def get_backtest_end_date(
 
 
 def get_trading_calendar(cleaned_close_prices_dataset: pl.DataFrame) -> pl.DataFrame:
-    return cleaned_close_prices_dataset.select("date").unique().sort("date")
+    return cleaned_close_prices_dataset.select("date").unique(maintain_order=True)
 
 
 def create_date_mapping(
@@ -56,7 +56,7 @@ def create_date_mapping(
     ).select(col("date").alias("rebalance_date"))
 
     signal_and_rebalance_dates = rebalance_dates.join(
-        trading_calendar.sort("date").with_columns(
+        trading_calendar.with_columns(
             col("date").shift(1).alias("signal_date")
         ),
         left_on="rebalance_date",
@@ -186,7 +186,7 @@ def calculate_past_returns_std(
 
     filtered_dataset = cleaned_close_prices_dataset.filter(
         (col("date") >= window_start_date) & (col("date") <= backtest_end_date)
-    ).sort(["ticker", "date"])
+    )
 
     dataset_with_returns = filtered_dataset.with_columns(
         col("close").shift(1).over("ticker").alias("last_day_close")
@@ -206,7 +206,8 @@ def calculate_past_returns_std(
         left_on="date",
         right_on="signal_date",
         how="semi",
-    ).sort(["date", "ticker"])
+        maintain_order="left"
+    )
 
 
 def get_full_date_price_std_table(
