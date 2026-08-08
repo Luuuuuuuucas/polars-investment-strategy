@@ -1,6 +1,6 @@
 [project]
-name = "my-polars-project"
-version = "0.1.0"
+name = "polars-investment-strategy"
+version = "1.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"

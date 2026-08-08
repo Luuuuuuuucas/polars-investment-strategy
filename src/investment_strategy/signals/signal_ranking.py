@@ -41,5 +41,3 @@ def sort_rankings(filtered_signal_df: pl.DataFrame, rank_col: str) -> pl.DataFra
     For visualization only, not needed for other purposes.
     """
     return filtered_signal_df.sort(["signal_date", rank_col])
-
-

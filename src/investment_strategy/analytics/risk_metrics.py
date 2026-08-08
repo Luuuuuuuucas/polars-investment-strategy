@@ -35,3 +35,10 @@ def calculate_sharpe_ratio(
     risk_free_rate: float = 0.0,
 ) -> float:
     return (mean_daily_return * 252 - risk_free_rate) / annualized_volatility
+
+
+def calculate_calmer_ratio(
+    annualized_return_CAGR: float,
+    max_drawdown: float
+) -> float:
+    return annualized_return_CAGR / abs(max_drawdown)

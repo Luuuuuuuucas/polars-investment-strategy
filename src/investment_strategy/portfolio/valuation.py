@@ -40,6 +40,7 @@ def get_daily_position_value_table(
         ),
         on="rebalance_date",
         how="left",
+        maintain_order="left"
     )
 
     return (

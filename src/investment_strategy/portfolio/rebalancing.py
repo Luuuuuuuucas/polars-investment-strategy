@@ -58,6 +58,7 @@ def calculate_reference_portfolio_value(
             ),
             on=["rebalance_date", "ticker"],
             how="left",
+            maintain_order="left"
         )
     )
 
