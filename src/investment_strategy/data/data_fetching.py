@@ -13,22 +13,40 @@ def download_yfinance_prices(
     """
     Download daily auto-adjusted OHLCV data from Yahoo Finance and return a normalized long-format Polars DataFrame.
 
-    Parameters
-    ----------
-    tickers
-        Yahoo Finance ticker symbols.
-    start_date
-        Inclusive start date in YYYY-MM-DD format.
-    end_date
-        Exclusive end date in YYYY-MM-DD format.
+    Arguments:
+        tickers
+            Yahoo Finance ticker symbols.
+        start_date
+            Inclusive start date in YYYY-MM-DD format.
+        end_date
+            Exclusive end date in YYYY-MM-DD format.
 
-    Returns
-    -------
-    pl.DataFrame
-        Columns:
-        date, ticker, open, high, low, close, volume.
+    Returns:
+        A Polars DataFrame with columns: date, ticker, open, high, low, close, volume.
+        The DataFrame is sorted by date and ticker.
 
-        OHLC prices are adjusted for stock splits and cash dividends because auto_adjust=True.
+    Example:
+        >>> prices = download_yfinance_prices(
+        ...     tickers=["AAPL", "MSFT"],
+        ...     start_date="2026-01-05",
+        ...     end_date="2026-01-08",
+        ... )
+        >>> prices
+        shape: (6, 7)
+        ┌────────────┬────────┬────────┬────────┬────────┬────────┬──────────┐
+        │ date       ┆ ticker ┆ open   ┆ high   ┆ low    ┆ close  ┆ volume   │
+        │ ---        ┆ ---    ┆ ---    ┆ ---    ┆ ---    ┆ ---    ┆ ---      │
+        │ date       ┆ str    ┆ f64    ┆ f64    ┆ f64    ┆ f64    ┆ i64      │
+        ╞════════════╪════════╪════════╪════════╪════════╪════════╪══════════╡
+        │ 2026-01-05 ┆ AAPL   ┆ ...    ┆ ...    ┆ ...    ┆ ...    ┆ ...      │
+        │ 2026-01-05 ┆ MSFT   ┆ ...    ┆ ...    ┆ ...    ┆ ...    ┆ ...      │
+        │ 2026-01-06 ┆ AAPL   ┆ ...    ┆ ...    ┆ ...    ┆ ...    ┆ ...      │
+        │ 2026-01-06 ┆ MSFT   ┆ ...    ┆ ...    ┆ ...    ┆ ...    ┆ ...      │
+        │ 2026-01-07 ┆ AAPL   ┆ ...    ┆ ...    ┆ ...    ┆ ...    ┆ ...      │
+        │ 2026-01-07 ┆ MSFT   ┆ ...    ┆ ...    ┆ ...    ┆ ...    ┆ ...      │
+        └────────────┴────────┴────────┴────────┴────────┴────────┴──────────┘
+
+    Note: OHLC prices are adjusted for stock splits and cash dividends because auto_adjust=True.
     """
 
     raw = yf.download(

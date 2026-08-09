@@ -9,7 +9,49 @@ def get_backtest_period_close_prices(
     backtest_end_date: date,
 ) -> pl.DataFrame:
     """
-    Creates a filtered close prices dataset, which will be used in get_daily_position_value_table.
+    Filter the cleaned close price dataset to the backtest date range.
+    It is used for get_daily_position_value_table.
+
+    Arguments:
+        cleaned_close_prices_dataset: A cleaned Polars DataFrame containing columns: date, ticker, close.
+
+        backtest_start_date: The start date of the backtest.
+
+        backtest_end_date: The end date of the backtest.
+
+    Returns:
+        cleaned_close_prices_dataset with dates in the backtest date range.
+
+    Example:
+        >>> cleaned_close_prices_dataset = pl.DataFrame(
+        ...     {
+        ...         "date": [
+        ...             date(2023, 12, 29),
+        ...             date(2024, 1, 2),
+        ...             date(2024, 1, 3),
+        ...             date(2024, 1, 4),
+        ...             date(2024, 1, 5),
+        ...         ],
+        ...         "ticker": ["A", "A", "A", "A", "A"],
+        ...         "close": [98.0, 100.0, 101.0, 102.0, 103.0],
+        ...     }
+        ... )
+
+        >>> get_backtest_period_close_prices(
+        ...     cleaned_close_prices_dataset=cleaned_close_prices_dataset,
+        ...     backtest_start_date=date(2024, 1, 2),
+        ...     backtest_end_date=date(2024, 1, 4),
+        ... )
+        shape: (3, 3)
+        ┌────────────┬────────┬───────┐
+        │ date       │ ticker │ close │
+        │ ---        │ ---    │ ---   │
+        │ date       │ str    │ f64   │
+        ╞════════════╪════════╪═══════╡
+        │ 2024-01-02 │ A      │ 100.0 │
+        │ 2024-01-03 │ A      │ 101.0 │
+        │ 2024-01-04 │ A      │ 102.0 │
+        └────────────┴────────┴───────┘
     """
     return cleaned_close_prices_dataset.filter(
         (col("date") >= backtest_start_date) & (col("date") <= backtest_end_date)
@@ -20,7 +62,41 @@ def get_next_date_matched_rebalance_level_table(
     rebalance_level_table: pl.DataFrame,
 ) -> pl.DataFrame:
     """
-    Creates a filtered close prices dataset, which will be used in get_daily_position_value_table and get_daily_portfolio_table.
+    Match the current rebalance date to the next rebalance date.
+    It is used for get_daily_position_value_table and get_daily_portfolio_table.
+
+    Arguments:
+        rebalance_level_table: A Polars DataFrame containing columns: rebalance_date, portfolio_value, cash_residual.
+
+    Returns:
+        rebalance_level_table with an additional column: next_rebalance_date.
+
+    Example:
+        >>> rebalance_level_table = pl.DataFrame(
+        ...     {
+        ...         "rebalance_date": [
+        ...             date(2024, 1, 2),
+        ...             date(2024, 2, 1),
+        ...             date(2024, 3, 1),
+        ...         ],
+        ...         "portfolio_value": [100000.0, 103000.0, 101500.0],
+        ...         "cash_residual": [200.0, 150.0, 180.0],
+        ...     }
+        ... )
+
+        >>> get_next_date_matched_rebalance_level_table(
+        ...     rebalance_level_table
+        ... )
+        shape: (3, 4)
+        ┌────────────────┬─────────────────┬───────────────┬─────────────────────┐
+        │ rebalance_date │ portfolio_value │ cash_residual │ next_rebalance_date │
+        │ ---            │ ---             │ ---           │ ---                 │
+        │ date           │ f64             │ f64           │ date                │
+        ╞════════════════╪═════════════════╪═══════════════╪═════════════════════╡
+        │ 2024-01-02     │ 100000.0        │ 200.0         │ 2024-02-01          │
+        │ 2024-02-01     │ 103000.0        │ 150.0         │ 2024-03-01          │
+        │ 2024-03-01     │ 101500.0        │ 180.0         │ null                │
+        └────────────────┴─────────────────┴───────────────┴─────────────────────┘
     """
     return rebalance_level_table.with_columns(
         col("rebalance_date").shift(-1).alias("next_rebalance_date")
@@ -32,6 +108,30 @@ def get_daily_position_value_table(
     next_date_matched_rebalance_level_table: pl.DataFrame,
     position_level_table: pl.DataFrame,
 ) -> pl.DataFrame:
+    """
+    Create a daily position-value table with reference to rebalance level table and position level table.
+
+    Arguments:
+        backtest_period_close_prices: A Polars DataFrame with dates in the backtest date range, containing columns:
+            date, ticker, close
+        
+        next_date_matched_rebalance_level_table: A Polars DataFrame containing columns: rebalance_date, portfolio_value,
+            cash_residual, next_rebalance_date
+
+        position_level_table: A Polars DataFrame containing columns: rebalance_date, ticker, shares.
+
+    Returns:
+        A Polars DataFrame containing columns: date, rebalance_date, ticker, shares, close, position_value.
+
+    Example:
+        >>> daily_position_value_table = get_daily_position_value_table(
+        ...     backtest_period_close_prices=backtest_period_close_prices,
+        ...     next_date_matched_rebalance_level_table=next_date_matched_rebalance_level_table,
+        ...     position_level_table=position_level_table,
+        ... )
+
+        >>> daily_position_value_table.head()
+    """
     position_level_table = position_level_table.rename({"ticker": "portfolio_ticker"})
 
     date_matched_position_level_table = position_level_table.join(
@@ -69,6 +169,27 @@ def get_daily_portfolio_table(
     next_date_matched_rebalance_level_table: pl.DataFrame,
     daily_position_value_table: pl.DataFrame,
 ) -> pl.DataFrame:
+    """
+    Create a daily portfolio table with reference to rebalance level table and daily position-value table.
+
+    Arguments:
+        next_date_matched_rebalance_level_table: A Polars DataFrame containing columns: rebalance_date, portfolio_value,
+            cash_residual, next_rebalance_date
+        
+        daily_position_value_table: A Polars DataFrame containing columns: date, rebalance_date, ticker,
+            shares, close, position_value.
+
+    Returns:
+        A Polars DataFrame containing columns: date, positions_value, cash_residual, portfolio_value, daily_return.
+
+    Example:
+        >>> daily_portfolio_table = get_daily_portfolio_table(
+        ...     next_date_matched_rebalance_level_table=next_date_matched_rebalance_level_table,
+        ...     daily_position_value_table=daily_position_value_table,
+        ... )
+
+        >>> daily_portfolio_table.head()
+    """
     sorted_daily_position_values = (
         daily_position_value_table.select(
             col("date"), col("position_value").alias("positions_value")
