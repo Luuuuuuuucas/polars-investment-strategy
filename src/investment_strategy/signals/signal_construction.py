@@ -360,7 +360,7 @@ def calculate_past_returns_std(
 ) -> pl.DataFrame:
     """
     Calculate return volatility over the lookback date and the lag base date.
-    
+
     Arguments:
         cleaned_close_prices_dataset: A cleaned Polars DataFrame containing columns: date, ticker, close.
 
@@ -389,17 +389,15 @@ def calculate_past_returns_std(
     True
 
     Note:
-    - This function uses simple returns rather than log returns.
-    - This function is designed to support sequential factor construction.
-      Existing columns in `factor_reference_table` are preserved, and the volatility factor is appended as a new column.
-
+        This function is designed to support sequential factor construction.
+        Existing columns in `factor_reference_table` are preserved, and the volatility factor is appended as a new column.
     """
     start_date = date_mapping_df.get_column("lookback_date").first()
     end_date = date_mapping_df.get_column("lag_base_date").last()
 
     vol = (
         cleaned_close_prices_dataset.with_columns(
-            col("close").pct_change().over("ticker").alias("daily_return")
+            col("close").log().diff().over("ticker").alias("daily_return")
         )
         .filter(col("date").is_between(start_date, end_date))
         .join_where(
@@ -408,8 +406,9 @@ def calculate_past_returns_std(
                 "lag_base_date",
                 "signal_date",
             ),
-            col("date") > col("lookback_date"),
-            col("date") <= col("lag_base_date"),
+            col("date").is_between(
+                col("lookback_date"), col("lag_base_date"), closed="right"
+            ),
         )
         .sort(["signal_date"])
         .group_by(["ticker", "signal_date"], maintain_order=True)
@@ -441,7 +440,7 @@ def get_risk_adjusted_return(
             signal_date, rebalance_date, ticker, lookback_close, lag_base_close, signal_close, rebalance_open,
             momentum_{lookback_period_for_total_returns}{lookback_period_unit}, and
             vol_{lookback_period_for_total_returns}{lookback_period_unit}
-        
+
         lookback_period_for_total_returns: The length of the lookback period.
 
         lookback_period_unit: The unit of the lookback period.
@@ -459,7 +458,7 @@ def get_risk_adjusted_return(
 
         >>> "risk_adjusted_momentum_6mo" in factor_reference_table.columns
         True
-            
+
     Note:
         This function is designed to support sequential factor construction.
         Existing columns are preserved, and the risk-adjusted momentum factor is appended as a new column.

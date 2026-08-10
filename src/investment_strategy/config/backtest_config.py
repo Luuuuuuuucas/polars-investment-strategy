@@ -1,0 +1,26 @@
+from datetime import date
+
+
+# Framework defaults
+
+LAG_PERIOD = 1
+LAG_PERIOD_UNIT = "mo"
+TRADING_DAYS_PER_YEAR = 252
+
+
+# Backtest configuration
+
+INITIAL_CAPITAL = 1_000_000
+
+BACKTEST_START_DATE = date(2021, 12, 31)
+
+BACKTEST_PERIOD = 36
+BACKTEST_PERIOD_UNIT = "mo"
+
+REBALANCE_FREQUENCY = 2
+REBALANCE_FREQ_UNIT = "mo"
+
+LOOKBACK_PERIOD = 6
+LOOKBACK_PERIOD_UNIT = "mo"
+
+TOP_N = 10

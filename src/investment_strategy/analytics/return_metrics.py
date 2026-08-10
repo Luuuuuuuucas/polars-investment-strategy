@@ -54,12 +54,16 @@ def prepare_daily_portfolio_value_return_df(
     )
 
 
-def calculate_total_return(daily_portfolio_value_return_df: pl.DataFrame) -> float:
+def calculate_total_return(
+    daily_portfolio_value_return_df: pl.DataFrame, initial_capital: int | float
+) -> float:
     """
     Calculate the percentage change of the ending portfolio relative to the beginning portfolio value.
 
     Arguments:
         daily_portfolio_value_return_df: A Polars DataFrame containing columns: date, portfolio_value, daily_return.
+
+        initial_capital: The initial amount of capital to invest in the portfolio.
 
     Returns:
         A float representing the percentage change of the ending portfolio relative to the beginning portfolio value.
@@ -78,21 +82,17 @@ def calculate_total_return(daily_portfolio_value_return_df: pl.DataFrame) -> flo
         ... )
 
         >>> calculate_total_return(
-        ...     daily_portfolio_value_return_df
+        ...     daily_portfolio_value_return_df,
+        ...     initial_capital=100000.0
         ... )
         0.05
-        
-    Note:
-        Daily portfolio values are based on closing prices. Therefore, total return is measured from
-        the first available close-valued portfolio observation to the final close-valued portfolio
-        observation, rather than from the initial rebalance open value.
     """
     portfolio_values = daily_portfolio_value_return_df.get_column("portfolio_value")
-    return portfolio_values.last() / portfolio_values.first() - 1
+    return portfolio_values.last() / initial_capital - 1
 
 
 def calculate_annualized_return_cagr(
-    daily_portfolio_value_return_df: pl.DataFrame,
+    daily_portfolio_value_return_df: pl.DataFrame, initial_capital: int | float
 ) -> float:
     """
     Calculate the annualized return (CAGR) assuming 252 trading days per year.
@@ -100,9 +100,11 @@ def calculate_annualized_return_cagr(
     Arguments:
         daily_portfolio_value_return_df: A Polars DataFrame containing columns: date, portfolio_value, daily_return.
 
+        initial_capital: The initial amount of capital to invest in the portfolio.
+
     Returns:
         A float representing the annualized return assuming 252 trading days per year.
-    
+
     Example:
         >>> daily_portfolio_value_return_df = pl.DataFrame(
         ...     {
@@ -128,13 +130,14 @@ def calculate_annualized_return_cagr(
         ... )
 
         >>> calculate_annualized_return_cagr(
-        ...     daily_portfolio_value_return_df
+        ...     daily_portfolio_value_return_df,
+        ...     initial_capital=100000.0
         ... )
         10.98...
     """
     portfolio_values = daily_portfolio_value_return_df.get_column("portfolio_value")
     n_periods = portfolio_values.len() - 1
-    return (portfolio_values.last() / portfolio_values.first()) ** (252 / n_periods) - 1
+    return (portfolio_values.last() / initial_capital) ** (252 / n_periods) - 1
 
 
 def calculate_mean_daily_return(daily_portfolio_value_return_df: pl.DataFrame) -> float:
@@ -176,9 +179,7 @@ def calculate_mean_daily_return(daily_portfolio_value_return_df: pl.DataFrame) -
         ... )
         0.005
     """
-    daily_returns = daily_portfolio_value_return_df.get_column(
-        "daily_return"
-    )
+    daily_returns = daily_portfolio_value_return_df.get_column("daily_return")
     return daily_returns.mean()
 
 
@@ -223,7 +224,5 @@ def calculate_annualized_mean_return(
         ... )
         2.51...
     """
-    daily_returns = daily_portfolio_value_return_df.get_column(
-        "daily_return"
-    )
+    daily_returns = daily_portfolio_value_return_df.get_column("daily_return")
     return (1 + daily_returns.mean()) ** 252 - 1

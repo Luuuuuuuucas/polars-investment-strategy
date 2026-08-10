@@ -54,7 +54,7 @@ def get_backtest_period_close_prices(
         └────────────┴────────┴───────┘
     """
     return cleaned_close_prices_dataset.filter(
-        (col("date") >= backtest_start_date) & (col("date") <= backtest_end_date)
+        col("date").is_between(backtest_start_date, backtest_end_date)
     )
 
 
@@ -168,6 +168,7 @@ def get_daily_position_value_table(
 def get_daily_portfolio_table(
     next_date_matched_rebalance_level_table: pl.DataFrame,
     daily_position_value_table: pl.DataFrame,
+    initial_capital: float
 ) -> pl.DataFrame:
     """
     Create a daily portfolio table with reference to rebalance level table and daily position-value table.
@@ -179,6 +180,8 @@ def get_daily_portfolio_table(
         daily_position_value_table: A Polars DataFrame containing columns: date, rebalance_date, ticker,
             shares, close, position_value.
 
+        initial_capital:
+            The initial amount of capital to invest in the portfolio.
     Returns:
         A Polars DataFrame containing columns: date, positions_value, cash_residual, portfolio_value, daily_return.
 
@@ -186,9 +189,15 @@ def get_daily_portfolio_table(
         >>> daily_portfolio_table = get_daily_portfolio_table(
         ...     next_date_matched_rebalance_level_table=next_date_matched_rebalance_level_table,
         ...     daily_position_value_table=daily_position_value_table,
+        ...     initial_capital=initial_capital
         ... )
 
         >>> daily_portfolio_table.head()
+
+    Note:
+        The first daily return is calculated from the initial capital at the first rebalance open to the portfolio value
+        at the end of the first trading day. Subsequent daily returns are calculated using the percentage change in
+        portfolio value.
     """
     sorted_daily_position_values = (
         daily_position_value_table.select(
@@ -217,6 +226,6 @@ def get_daily_portfolio_table(
             (col("positions_value") + col("cash_residual")).alias("portfolio_value")
         )
         .with_columns(
-            col("portfolio_value").pct_change().alias("daily_return")
+            col("portfolio_value").pct_change().fill_null(col("portfolio_value") / initial_capital - 1).alias("daily_return")
         )
     )
