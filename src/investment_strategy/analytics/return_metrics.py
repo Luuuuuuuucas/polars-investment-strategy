@@ -83,7 +83,7 @@ def calculate_total_return(
 
         >>> calculate_total_return(
         ...     daily_portfolio_value_return_df,
-        ...     initial_capital=100000.0
+        ...     initial_capital=100_000.0
         ... )
         0.05
     """
@@ -131,7 +131,7 @@ def calculate_annualized_return_cagr(
 
         >>> calculate_annualized_return_cagr(
         ...     daily_portfolio_value_return_df,
-        ...     initial_capital=100000.0
+        ...     initial_capital=100_000.0
         ... )
         10.98...
     """

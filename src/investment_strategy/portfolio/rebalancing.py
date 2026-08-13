@@ -27,6 +27,8 @@ def calculate_position_sizing(
     rebalance_allocation_df: pl.DataFrame,
     current_rebalance_date: date,
     investable_value: int | float,
+    execution_cost_rate: float,
+    commission_per_share: int | float,
 ) -> pl.DataFrame:
     """
     Calculate integer share quantities for the current rebalance date using investable value.
@@ -38,7 +40,11 @@ def calculate_position_sizing(
         current_rebalance_date: The current rebalance date in the loop.
 
         investable_value: The amount of capital available for investment.
-    
+
+        execution_cost_rate: Proportional execution costs (e.g., bid-ask spread and slippage).
+
+        commission_per_share: Fixed fee charged for each individual share bought or sold.
+
     Returns:
         A Polars DataFrame containing columns: rebalance_date, ticker, shares.
 
@@ -60,6 +66,8 @@ def calculate_position_sizing(
         ...     rebalance_allocation_df=rebalance_allocation_df,
         ...     current_rebalance_date=date(2024, 2, 1),
         ...     investable_value=10000,
+        ...     execution_cost_rate=0.001,
+        ...     commission_per_share=0.01,
         ... )
         shape: (2, 3)
         ┌────────────────┬────────┬────────┐
@@ -67,29 +75,32 @@ def calculate_position_sizing(
         │ ---            │ ---    │ ---    │
         │ date           │ str    │ i64    │
         ╞════════════════╪════════╪════════╡
-        │ 2024-02-01     │ A      │ 120    │
-        │ 2024-02-01     │ B      │ 40     │
+        │ 2024-02-01     │ A      │ 119    │
+        │ 2024-02-01     │ B      │ 39     │
         └────────────────┴────────┴────────┘
-    
+
     Note: This is a helper function used by run_rebalance_simulation.
     """
+    cost_per_share = col("rebalance_open") * execution_cost_rate + commission_per_share
     return rebalance_allocation_df.filter(
         col("rebalance_date") == current_rebalance_date
     ).select(
         col("rebalance_date"),
         col("ticker"),
         (
-            (investable_value * col("portfolio_weight") / col("rebalance_open"))
-            .floor()
-            .cast(pl.Int64)
-            .alias("shares")
-        ),
+            investable_value
+            * col("portfolio_weight")
+            / (cost_per_share + col("rebalance_open"))
+        )
+        .floor()
+        .cast(pl.Int64)
+        .alias("shares"),
     )
 
 
 def calculate_reference_position_value(
     factor_reference_table: pl.DataFrame,
-    current_positions: pl.DataFrame,
+    post_rebalance_positions: pl.DataFrame,
     reference_date: date,
 ) -> float:
     """
@@ -99,7 +110,7 @@ def calculate_reference_position_value(
         factor_reference_table: A Polars DataFrame containing columns: lookback_date, lag_base_date, signal_date,
             rebalance_date, ticker, lookback_close, lag_base_close, signal_close, rebalance_open.
 
-        current_positions: A Polars DataFrame containing the current holdings.
+        post_rebalance_positions: A Polars DataFrame containing the current holdings.
             At minimum, the columns, ticker and shares, must be present.
 
         reference_date: The specific date where the valuation occurs.
@@ -108,7 +119,7 @@ def calculate_reference_position_value(
         A float representing the position value.
 
     Example:
-        >>> current_positions = pl.DataFrame(
+        >>> post_rebalance_positions = pl.DataFrame(
         ...     {
         ...         "rebalance_date": [
         ...             date(2024, 1, 2),
@@ -132,7 +143,7 @@ def calculate_reference_position_value(
 
         >>> calculate_reference_position_value(
         ...     factor_reference_table=factor_reference_table,
-        ...     current_positions=current_positions,
+        ...     post_rebalance_positions=post_rebalance_positions,
         ...     reference_date=date(2024, 2, 1),
         ... )
         10000.0
@@ -140,7 +151,7 @@ def calculate_reference_position_value(
     Note: This is a helper function used by run_rebalance_simulation. The positions are valued before and after each rebalance.
     """
     valued_positions = (
-        current_positions.select(col("ticker"), col("shares"))
+        post_rebalance_positions.select(col("ticker"), col("shares"))
         .with_columns(pl.lit(reference_date).alias("rebalance_date"))
         .join(
             factor_reference_table.select(
@@ -150,11 +161,100 @@ def calculate_reference_position_value(
             ),
             on=["rebalance_date", "ticker"],
             how="left",
-            maintain_order="left"
+            maintain_order="left",
         )
     )
 
     return valued_positions.select((col("shares") * col("rebalance_open")).sum()).item()
+
+
+def calculate_trade_cash_flows(
+    factor_reference_table: pl.DataFrame,
+    pre_rebalance_positions: pl.DataFrame,
+    post_rebalance_positions: pl.DataFrame,
+    rebalance_date: date,
+    execution_cost_rate: float,
+    commission_per_share: int | float,
+) -> pl.DataFrame:
+    """
+    Calculate cash flows and transaction costs for a specific rebalance date.
+
+    Arguments:
+        factor_reference_table: A Polars DataFrame containing columns: lookback_date, lag_base_date, signal_date,
+            rebalance_date, ticker, lookback_close, lag_base_close, signal_close, rebalance_open.
+
+        pre_rebalance_positions: A Polars DataFrame containing columns:
+            rebalance_date, ticker, shares, representing portfolio positions before rebalancing.
+
+        post_rebalance_positions: A Polars DataFrame containing columns:
+            rebalance_date, ticker, shares, representing target portfolio positions after rebalancing.
+
+        rebalance_date: The current rebalance date.
+
+        execution_cost_rate: Proportional execution costs (e.g., bid-ask spread and slippage).
+
+        commission_per_share: Fixed fee charged for each individual share bought or sold.
+
+    Returns:
+        A Polars DataFrame containing columns: rebalance_date, ticker, shares_traded, rebalance_open,
+            trade_value, execution_cost, commission, transaction_cost, cash_flows.
+
+    Note:
+    - Positive shares_traded values represent shares bought, while negative values represent shares sold.
+    - Trading costs are always recorded as positive values.
+    - Buy trades generate negative cash flows, while sell trades generate positive cash flows net of transaction costs.
+    - This is a helper function used by run_rebalance_simulation.
+    """
+    cost_per_share = col("rebalance_open") * execution_cost_rate + commission_per_share
+
+    return (
+        pre_rebalance_positions.select(col("ticker"), col("shares"))
+        .join(
+            post_rebalance_positions.select(col("ticker"), col("shares")),
+            on="ticker",
+            how="full",
+            nulls_equal=True,
+            coalesce=True,
+        )
+        .with_columns(col("shares").fill_null(0), col("shares_right").fill_null(0))
+        .with_columns(
+            (col("shares_right") - col("shares")).alias("shares_traded"),
+            pl.lit(rebalance_date).alias("rebalance_date"),
+        )
+        .select(col("ticker"), col("shares_traded"), col("rebalance_date"))
+        .join(
+            factor_reference_table.select(
+                col("rebalance_date"),
+                col("ticker"),
+                col("rebalance_open"),
+            ),
+            on=["rebalance_date", "ticker"],
+            how="left",
+            maintain_order="left",
+        )
+        .with_columns(
+            (abs(col("shares_traded")) * col("rebalance_open") * execution_cost_rate).alias("execution_cost"),
+            (abs(col("shares_traded")) * commission_per_share).alias("commission"),
+            (abs(col("shares_traded")) * cost_per_share).alias("transaction_cost"),
+            (abs(col("shares_traded")) * col("rebalance_open")).alias("trade_value"),
+        )
+        .with_columns(
+            (
+                -col("shares_traded") * col("rebalance_open") - col("transaction_cost")
+            ).alias("cash_flows")
+        )
+        .select(
+            col("rebalance_date"),
+            col("ticker"),
+            col("shares_traded"),
+            col("rebalance_open"),
+            col("trade_value"),
+            col("execution_cost"),
+            col("commission"),
+            col("transaction_cost"),
+            col("cash_flows"),
+        )
+    )
 
 
 def run_rebalance_simulation(
@@ -162,15 +262,17 @@ def run_rebalance_simulation(
     rebalance_allocation_df: pl.DataFrame,
     initial_capital: int | float,
     rebalance_dates: pl.Series,
+    execution_cost_rate: float,
+    commission_per_share: int | float,
 ) -> dict[str, pl.DataFrame]:
     """
-    Simulate all the rebalance occurrences. Record portfolio value, cash residual,
-        and number of shares of each asset within each rebalance date.
+    Simulate all the rebalance occurrences. Record portfolio value, cash residual, number of shares,
+        transaction cost, cash flows, and number of shares of each asset within each rebalance date.
 
     Arguments:
         factor_reference_table: A Polars DataFrame containing columns: lookback_date, lag_base_date, signal_date,
             rebalance_date, ticker, lookback_close, lag_base_close, signal_close, rebalance_open.
-        
+
         rebalance_allocation_df: A Polars DataFrame containing columns:
             rebalance_date, ticker, rebalance_open, portfolio_weight.
 
@@ -178,44 +280,143 @@ def run_rebalance_simulation(
 
         rebalance_dates: The predefined rebalance dates.
 
+        execution_cost_rate: Proportional execution costs (e.g., bid-ask spread and slippage).
+
+        commission_per_share: Fixed fee charged for each individual share bought or sold.
+
     Example:
-        >>> rebalance_dates = date_mapping_df.get_column("rebalance_date")
+        >>> factor_reference_table = pl.DataFrame(
+        ...     {
+        ...         "lookback_date": [
+        ...             date(2023, 7, 1),
+        ...             date(2023, 7, 1),
+        ...             date(2023, 8, 1),
+        ...             date(2023, 8, 1),
+        ...         ],
+        ...         "lag_base_date": [
+        ...             date(2023, 12, 1),
+        ...             date(2023, 12, 1),
+        ...             date(2024, 1, 1),
+        ...             date(2024, 1, 1),
+        ...         ],
+        ...         "signal_date": [
+        ...             date(2024, 1, 31),
+        ...             date(2024, 1, 31),
+        ...             date(2024, 2, 29),
+        ...             date(2024, 2, 29),
+        ...         ],
+        ...         "rebalance_date": [
+        ...             date(2024, 2, 1),
+        ...             date(2024, 2, 1),
+        ...             date(2024, 3, 1),
+        ...             date(2024, 3, 1),
+        ...         ],
+        ...         "ticker": ["A", "B", "A", "B"],
+        ...         "lookback_close": [40.0, 80.0, 45.0, 85.0],
+        ...         "lag_base_close": [48.0, 95.0, 55.0, 92.0],
+        ...         "signal_close": [49.0, 98.0, 58.0, 91.0],
+        ...         "rebalance_open": [50.0, 100.0, 60.0, 90.0],
+        ...     }
+        ... )
+
+        >>> rebalance_allocation_df = pl.DataFrame(
+        ...     {
+        ...         "rebalance_date": [
+        ...             date(2024, 2, 1),
+        ...             date(2024, 2, 1),
+        ...             date(2024, 3, 1),
+        ...             date(2024, 3, 1),
+        ...         ],
+        ...         "ticker": ["A", "B", "A", "B"],
+        ...         "rebalance_open": [50.0, 100.0, 60.0, 90.0],
+        ...         "portfolio_weight": [0.5, 0.5, 0.5, 0.5],
+        ...     }
+        ... )
+
+        >>> rebalance_dates = pl.Series(
+        ...     "rebalance_date",
+        ...     [date(2024, 2, 1), date(2024, 3, 1)],
+        ... )
 
         >>> simulation_result = run_rebalance_simulation(
         ...     factor_reference_table=factor_reference_table,
         ...     rebalance_allocation_df=rebalance_allocation_df,
-        ...     initial_capital=100_000,
+        ...     initial_capital=1000,
         ...     rebalance_dates=rebalance_dates,
+        ...     execution_cost_rate=0.001,
+        ...     commission_per_share=0.01,
         ... )
 
-        >>> rebalance_level_table = simulation_result["rebalance_level_table"]
-        >>> position_level_table = simulation_result["position_level_table"]
+        >>> simulation_result["rebalance_level_table"]
+        shape: (2, 4)
+        ┌────────────────┬─────────────────┬───────────────┬──────────────────┐
+        │ rebalance_date │ portfolio_value │ cash_residual │ transaction_cost │
+        │ ---            │ ---             │ ---           │ ---              │
+        │ date           │ f64             │ f64           │ f64              │
+        ╞════════════════╪═════════════════╪═══════════════╪══════════════════╡
+        │ 2024-02-01     │ 999.02          │ 149.02        │ 0.98             │
+        │ 2024-03-01     │ 1048.85         │ 118.85        │ 0.17             │
+        └────────────────┴─────────────────┴───────────────┴──────────────────┘
 
-        >>> rebalance_level_table.head()
-        >>> position_level_table.head()
-        
+        >>> simulation_result["position_level_table"]
+        shape: (4, 3)
+        ┌────────────────┬────────┬────────┐
+        │ rebalance_date │ ticker │ shares │
+        │ ---            │ ---    │ ---    │
+        │ date           │ str    │ i64    │
+        ╞════════════════╪════════╪════════╡
+        │ 2024-02-01     │ A      │ 9      │
+        │ 2024-02-01     │ B      │ 4      │
+        │ 2024-03-01     │ A      │ 8      │
+        │ 2024-03-01     │ B      │ 5      │
+        └────────────────┴────────┴────────┘
+
+        >>> simulation_result["trade_level_table"]
+        shape: (4, 9)
+        ┌────────────────┬────────┬───────────────┬────────────────┬─────────────┬────────────────┬────────────┬──────────────────┬────────────┐
+        │ rebalance_date │ ticker │ shares_traded │ rebalance_open │ trade_value │ execution_cost │ commission │ transaction_cost │ cash_flows │
+        │ ---            │ ---    │ ---           │ ---            │ ---         │ ---            │ ---        │ ---              │ ---        │
+        │ date           │ str    │ i64           │ f64            │ f64         │ f64            │ f64        │ f64              │ f64        │
+        ╞════════════════╪════════╪═══════════════╪════════════════╪═════════════╪════════════════╪════════════╪══════════════════╪════════════╡
+        │ 2024-02-01     │ A      │ 9             │ 50.0           │ 450.0       │ 0.45           │ 0.09       │ 0.54             │ -450.54    │
+        │ 2024-02-01     │ B      │ 4             │ 100.0          │ 400.0       │ 0.4            │ 0.04       │ 0.44             │ -400.44    │
+        │ 2024-03-01     │ A      │ -1            │ 60.0           │ -60.0       │ 0.06           │ 0.01       │ 0.07             │ 59.93      │
+        │ 2024-03-01     │ B      │ 1             │ 90.0           │ 90.0        │ 0.09           │ 0.01       │ 0.10             │ -90.10     │
+        └────────────────┴────────┴───────────────┴────────────────┴─────────────┴────────────────┴────────────┴──────────────────┴────────────┘
+
     Returns:
         A dictionary containing:
             "rebalance_level_table":
-                A Polars DataFrame containing columns: rebalance_date, portfolio_value, cash_residual.
+                A Polars DataFrame containing columns: rebalance_date, portfolio_value, cash_residual, transaction_cost.
 
             "position_level_table":
                 A Polars DataFrame containing columns: rebalance_date, ticker, shares.
+
+            "trade_level_table":
+                A Polars DataFrame containing columns: rebalance_date, ticker, shares_traded, rebalance_open, trade_value,
+                    execution_cost, commission, transaction_cost, cash_flows
+
+    Note:
+    - In trade_level_table, positive shares_traded values represent shares bought, while negative values represent shares sold.
+    - cash_residual in rebalance_level_table may be negative because transaction costs are deducted after position sizing and
+      can cause cash outflows to exceed the available cash balance.
     """
     current_cash_residual = float(initial_capital)
-    current_positions: pl.DataFrame | None = None
+    post_rebalance_positions = pl.DataFrame(schema={"ticker": str, "shares": pl.Int64})
 
     cash_residual_record = []
     portfolio_values_record = []
+    transaction_cost_record = []
     positions_record = []
+    cash_flows_record = []
 
-    for rebalance_date in rebalance_dates:
-        if current_positions is None:
+    for i, rebalance_date in enumerate(rebalance_dates):
+        if i == 0:
             positions_value_before_rebalance = 0.0
         else:
             positions_value_before_rebalance = calculate_reference_position_value(
                 factor_reference_table,
-                current_positions,
+                post_rebalance_positions,
                 rebalance_date,
             )
 
@@ -225,39 +426,66 @@ def run_rebalance_simulation(
 
         investable_value = total_value_before_rebalance
 
-        current_positions = calculate_position_sizing(
+        pre_rebalance_positions = post_rebalance_positions
+
+        post_rebalance_positions = calculate_position_sizing(
             rebalance_allocation_df,
             rebalance_date,
             investable_value,
+            execution_cost_rate,
+            commission_per_share,
+        )
+
+        trading_cash_flows = calculate_trade_cash_flows(
+            factor_reference_table,
+            pre_rebalance_positions,
+            post_rebalance_positions,
+            rebalance_date,
+            execution_cost_rate,
+            commission_per_share,
         )
 
         positions_value_after_rebalance = calculate_reference_position_value(
             factor_reference_table,
-            current_positions,
+            post_rebalance_positions,
             rebalance_date,
         )
 
-        current_cash_residual = investable_value - positions_value_after_rebalance
+        current_cash_residual = (
+            current_cash_residual + trading_cash_flows.get_column("cash_flows").sum()
+        )
 
         portfolio_value_after_rebalance = (
             positions_value_after_rebalance + current_cash_residual
         )
 
         cash_residual_record.append(current_cash_residual)
+
         portfolio_values_record.append(portfolio_value_after_rebalance)
 
-        positions_record.append(current_positions)
+        positions_record.append(post_rebalance_positions)
+
+        cash_flows_record.append(trading_cash_flows)
+
+        transaction_cost_record.append(
+            trading_cash_flows.get_column("transaction_cost").sum()
+        )
+
+    position_level_table: pl.DataFrame = pl.concat(positions_record, how="vertical")
 
     rebalance_level_table = pl.DataFrame(
         {
             "rebalance_date": rebalance_dates,
             "portfolio_value": portfolio_values_record,
             "cash_residual": cash_residual_record,
+            "transaction_cost": transaction_cost_record,
         }
     )
-    position_level_table = pl.concat(positions_record, how="vertical")
+
+    trade_level_table: pl.DataFrame = pl.concat(cash_flows_record, how="vertical")
 
     return {
         "rebalance_level_table": rebalance_level_table,
         "position_level_table": position_level_table,
+        "trade_level_table": trade_level_table,
     }
