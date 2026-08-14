@@ -66,7 +66,8 @@ def get_next_date_matched_rebalance_level_table(
     It is used for get_daily_position_value_table and get_daily_portfolio_table.
 
     Arguments:
-        rebalance_level_table: A Polars DataFrame containing columns: rebalance_date, portfolio_value, cash_residual.
+        rebalance_level_table: A Polars DataFrame containing columns: rebalance_date, pre_rebalance_portfolio_value,
+            post_rebalance_portfolio_value, cash_residual, transaction_cost.
 
     Returns:
         rebalance_level_table with an additional column: next_rebalance_date.
@@ -79,24 +80,34 @@ def get_next_date_matched_rebalance_level_table(
         ...             date(2024, 2, 1),
         ...             date(2024, 3, 1),
         ...         ],
-        ...         "portfolio_value": [100000.0, 103000.0, 101500.0],
+        ...         "pre_rebalance_portfolio_value": [
+        ...             100000.0,
+        ...             103500.0,
+        ...             102000.0,
+        ...         ],
+        ...         "post_rebalance_portfolio_value": [
+        ...             99850.0,
+        ...             103300.0,
+        ...             101820.0,
+        ...         ],
         ...         "cash_residual": [200.0, 150.0, 180.0],
+        ...         "transaction_cost": [150.0, 200.0, 180.0],
         ...     }
         ... )
 
         >>> get_next_date_matched_rebalance_level_table(
         ...     rebalance_level_table
         ... )
-        shape: (3, 4)
-        ┌────────────────┬─────────────────┬───────────────┬─────────────────────┐
-        │ rebalance_date │ portfolio_value │ cash_residual │ next_rebalance_date │
-        │ ---            │ ---             │ ---           │ ---                 │
-        │ date           │ f64             │ f64           │ date                │
-        ╞════════════════╪═════════════════╪═══════════════╪═════════════════════╡
-        │ 2024-01-02     │ 100000.0        │ 200.0         │ 2024-02-01          │
-        │ 2024-02-01     │ 103000.0        │ 150.0         │ 2024-03-01          │
-        │ 2024-03-01     │ 101500.0        │ 180.0         │ null                │
-        └────────────────┴─────────────────┴───────────────┴─────────────────────┘
+        shape: (3, 6)
+        ┌────────────────┬───────────────────────────────┬────────────────────────────────┬───────────────┬──────────────────┬─────────────────────┐
+        │ rebalance_date │ pre_rebalance_portfolio_value │ post_rebalance_portfolio_value │ cash_residual │ transaction_cost │ next_rebalance_date │
+        │ ---            │ ---                           │ ---                            │ ---           │ ---              │ ---                 │
+        │ date           │ f64                           │ f64                            │ f64           │ f64              │ date                │
+        ╞════════════════╪═══════════════════════════════╪════════════════════════════════╪═══════════════╪══════════════════╪═════════════════════╡
+        │ 2024-01-02     │ 100000.0                      │ 99850.0                        │ 200.0         │ 150.0            │ 2024-02-01          │
+        │ 2024-02-01     │ 103500.0                      │ 103300.0                       │ 150.0         │ 200.0            │ 2024-03-01          │
+        │ 2024-03-01     │ 102000.0                      │ 101820.0                       │ 180.0         │ 180.0            │ null                │
+        └────────────────┴───────────────────────────────┴────────────────────────────────┴───────────────┴──────────────────┴─────────────────────┘
     """
     return rebalance_level_table.with_columns(
         col("rebalance_date").shift(-1).alias("next_rebalance_date")
@@ -113,10 +124,10 @@ def get_daily_position_value_table(
 
     Arguments:
         backtest_period_close_prices: A Polars DataFrame with dates in the backtest date range, containing columns:
-            date, ticker, close
+            date, ticker, close.
         
-        next_date_matched_rebalance_level_table: A Polars DataFrame containing columns: rebalance_date, portfolio_value,
-            cash_residual, next_rebalance_date
+        next_date_matched_rebalance_level_table: A Polars DataFrame containing columns: rebalance_date, pre_rebalance_portfolio_value,
+            post_rebalance_portfolio_value, cash_residual, next_rebalance_date.
 
         position_level_table: A Polars DataFrame containing columns: rebalance_date, ticker, shares.
 
@@ -174,8 +185,8 @@ def get_daily_portfolio_table(
     Create a daily portfolio table with reference to rebalance level table and daily position-value table.
 
     Arguments:
-        next_date_matched_rebalance_level_table: A Polars DataFrame containing columns: rebalance_date, portfolio_value,
-            cash_residual, next_rebalance_date
+        next_date_matched_rebalance_level_table: A Polars DataFrame containing columns: rebalance_date, pre_rebalance_portfolio_value,
+            post_rebalance_portfolio_value, cash_residual, next_rebalance_date.
         
         daily_position_value_table: A Polars DataFrame containing columns: date, rebalance_date, ticker,
             shares, close, position_value.
