@@ -226,3 +226,173 @@ def calculate_annualized_mean_return(
     """
     daily_returns = daily_portfolio_value_return_df.get_column("daily_return")
     return (1 + daily_returns.mean()) ** 252 - 1
+
+
+def get_best_day(
+    daily_portfolio_value_return_df: pl.DataFrame,
+) -> pl.DataFrame:
+    """
+    Find the day with the highest daily return.
+
+    Arguments:
+        daily_portfolio_value_return_df: A Polars DataFrame containing columns: date, portfolio_value, daily_return.
+
+    Returns:
+        A Polars DataFrame containing the date, portfolio_value, daily_return, where the highest return occurs.
+
+    Example:
+        >>> daily_portfolio_value_return_df = pl.DataFrame(
+        ...     {
+        ...         "date": [
+        ...             date(2024, 1, 2),
+        ...             date(2024, 1, 3),
+        ...             date(2024, 1, 4),
+        ...             date(2024, 1, 5),
+        ...             date(2024, 1, 8),
+        ...         ],
+        ...         "portfolio_value": [
+        ...             100500.0,
+        ...             102510.0,
+        ...             101484.9,
+        ...             105036.8715,
+        ...             103986.502785,
+        ...         ],
+        ...         "daily_return": [
+        ...             0.005,
+        ...             0.020,
+        ...             -0.010,
+        ...             0.035,
+        ...             -0.010,
+        ...         ],
+        ...     }
+        ... )
+
+        >>> get_best_day(daily_portfolio_value_return_df)
+        shape: (1, 3)
+        ┌────────────┬─────────────────┬──────────────┐
+        │ date       ┆ portfolio_value ┆ daily_return │
+        │ ---        ┆ ---             ┆ ---          │
+        │ date       ┆ f64             ┆ f64          │
+        ╞════════════╪═════════════════╪══════════════╡
+        │ 2024-01-05 ┆ 105036.8715     ┆ 0.035        │
+        └────────────┴─────────────────┴──────────────┘
+
+    Note: If multiple days share the highest (or lowest) daily return, the first occurrence is returned.
+    """
+    max_daily_return = daily_portfolio_value_return_df.select(
+        pl.col("daily_return").arg_max()
+    ).item()
+    return daily_portfolio_value_return_df.slice(max_daily_return, 1)
+
+
+def get_worst_day(
+    daily_portfolio_value_return_df: pl.DataFrame,
+) -> pl.DataFrame:
+    """
+    Find the day with the lowest daily return.
+
+    Arguments:
+        daily_portfolio_value_return_df: A Polars DataFrame containing columns: date, portfolio_value, daily_return.
+
+    Returns:
+        A Polars DataFrame containing the date, portfolio_value, daily_return, where the lowest return occurs.
+
+    Example:
+        >>> daily_portfolio_value_return_df = pl.DataFrame(
+        ...     {
+        ...         "date": [
+        ...             date(2024, 1, 2),
+        ...             date(2024, 1, 3),
+        ...             date(2024, 1, 4),
+        ...             date(2024, 1, 5),
+        ...             date(2024, 1, 8),
+        ...         ],
+        ...         "portfolio_value": [
+        ...             100500.0,
+        ...             102510.0,
+        ...             101484.9,
+        ...             105036.8715,
+        ...             103986.502785,
+        ...         ],
+        ...         "daily_return": [
+        ...             0.005,
+        ...             0.020,
+        ...             -0.010,
+        ...             0.035,
+        ...             -0.010,
+        ...         ],
+        ...     }
+        ... )
+
+        >>> get_worst_day(daily_portfolio_value_return_df)
+        shape: (1, 3)
+        ┌────────────┬─────────────────┬──────────────┐
+        │ date       ┆ portfolio_value ┆ daily_return │
+        │ ---        ┆ ---             ┆ ---          │
+        │ date       ┆ f64             ┆ f64          │
+        ╞════════════╪═════════════════╪══════════════╡
+        │ 2024-01-04 ┆ 101484.9        ┆ -0.010       │
+        └────────────┴─────────────────┴──────────────┘
+
+    Note: If multiple days share the highest (or lowest) daily return, the first occurrence is returned.
+    """
+    min_daily_return = daily_portfolio_value_return_df.select(
+        pl.col("daily_return").arg_min()
+    ).item()
+    return daily_portfolio_value_return_df.slice(min_daily_return, 1)
+
+
+def get_win_rate(
+    daily_portfolio_value_return_df: pl.DataFrame,
+) -> float:
+    """
+    Calculate the win rate.
+
+    Arguments:
+        daily_portfolio_value_return_df: A Polars DataFrame containing columns: date, portfolio_value, daily_return.
+
+    Returns:
+        A float representing the win rate of the portfolio.
+
+    Example:
+        >>> daily_portfolio_value_return_df = pl.DataFrame(
+        ...     {
+        ...         "date": [
+        ...             date(2024, 1, 2),
+        ...             date(2024, 1, 3),
+        ...             date(2024, 1, 4),
+        ...             date(2024, 1, 5),
+        ...             date(2024, 1, 8),
+        ...         ],
+        ...         "portfolio_value": [
+        ...             100500.0,
+        ...             102510.0,
+        ...             101484.9,
+        ...             105036.8715,
+        ...             103986.502785,
+        ...         ],
+        ...         "daily_return": [
+        ...             0.005,
+        ...             0.020,
+        ...             -0.010,
+        ...             0.035,
+        ...             -0.010,
+        ...         ],
+        ...     }
+        ... )
+
+        >>> get_win_rate(daily_portfolio_value_return_df)
+        0.6
+    
+    Note:
+        The win rate is calculated using only winning and losing days. Days with a daily return of 0 are excluded.
+    """
+    wins = daily_portfolio_value_return_df.select(
+        (col("daily_return") > 0).sum()
+    ).item()
+
+    losses = daily_portfolio_value_return_df.select(
+        (col("daily_return") < 0).sum()
+    ).item()
+
+    return wins / (wins + losses)

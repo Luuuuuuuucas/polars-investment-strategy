@@ -94,7 +94,7 @@ def calculate_drawdown(daily_portfolio_value_return_df: pl.DataFrame) -> pl.Data
 
     Arguments:
         daily_portfolio_value_return_df: A Polars DataFrame containing columns: date, portfolio_value, daily_return.
-    
+
     Returns:
         daily_portfolio_value_return_df with an additional column: "drawdown".
 
@@ -198,7 +198,7 @@ def calculate_sharpe_ratio(
     mean_daily_return: float,
     annualized_volatility: float,
     *,
-    risk_free_rate: float = 0.0,
+    annual_rf: float = 0.0,
 ) -> float:
     """
     Calculate the portfolio Sharpe ratio.
@@ -208,7 +208,7 @@ def calculate_sharpe_ratio(
 
         annualized_volatility: The annualized portfolio return volatility assuming 252 trading days per year.
 
-        risk_free_rate: The annualized risk-free rate. Defaults to 0.0.
+        annual_rf: The annualized risk-free rate. Defaults to 0.0.
 
     Returns:
         A float represting the portfolio Sharpe ratio.
@@ -221,13 +221,10 @@ def calculate_sharpe_ratio(
         ... )
         0.64
     """
-    return (mean_daily_return * 252 - risk_free_rate) / annualized_volatility
+    return (mean_daily_return * 252 - annual_rf) / annualized_volatility
 
 
-def calculate_calmer_ratio(
-    annualized_return_cagr: float,
-    max_drawdown: float
-) -> float:
+def calculate_calmer_ratio(annualized_return_cagr: float, max_drawdown: float) -> float:
     """
     Calculate the Calmar ratio of the portfolio.
 
@@ -247,3 +244,60 @@ def calculate_calmer_ratio(
         2.0
     """
     return annualized_return_cagr / abs(max_drawdown)
+
+
+def calculate_sortino_ratio(
+    daily_portfolio_value_return_df: pl.DataFrame,
+    mean_daily_return: float,
+    *,
+    annual_rf: float = 0.0,
+) -> float:
+    """
+    Calculate portfolio sortino ratio.
+
+    Arguments:
+        daily_portfolio_value_return_df: A Polars DataFrame containing columns: date, portfolio_value, daily_return.
+
+        mean_daily_return: The arithmetic average return of the portfolio.
+
+        annual_rf: Annualized risk free rate. Default to 0.0.
+
+    Returns:
+        A float representing portfolio sortino ratio.
+
+    Example:
+        >>> daily_portfolio_value_return_df = pl.DataFrame(
+        ...     {
+        ...         "date": [
+        ...             date(2024, 1, 2),
+        ...             date(2024, 1, 3),
+        ...             date(2024, 1, 4),
+        ...             date(2024, 1, 5),
+        ...         ],
+        ...         "portfolio_value": [
+        ...             101500.0,
+        ...             104545.0,
+        ...             102976.825,
+        ...             107610.782125,
+        ...         ],
+        ...         "daily_return": [0.015, 0.030, -0.015, 0.045],
+        ...     }
+        ... )
+
+        >>> calculate_sortino_ratio(
+        ...     daily_portfolio_value_return_df=daily_portfolio_value_return_df,
+        ...     mean_daily_return=0.01875,
+        ...     annual_rf=0.03,
+        ... )
+        39.13196286399411
+    """
+    daily_rf = (1 + annual_rf) ** (1 / 252) - 1
+
+    daily_downside_deviation = (
+        daily_portfolio_value_return_df.select(
+            ((col("daily_return") - daily_rf).clip(upper_bound=0).pow(2)).mean()
+        ).item()
+        ** 0.5
+    )
+
+    return (mean_daily_return - daily_rf) * 252 / (daily_downside_deviation * 252**0.5)

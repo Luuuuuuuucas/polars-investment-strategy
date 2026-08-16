@@ -27,3 +27,15 @@ TOP_N = 10
 
 EXECUTION_COST_RATE = 0.001
 COMMISSION_PER_SHARE = 0.005
+
+ANNUAL_RISK_FREE_RATE = 0.03
+
+BENCHMARK_TICKERS = [
+    "^GSPC",  # S&P 500
+    "^IXIC",  # Nasdaq Composite
+    "^NDX",   # Nasdaq-100
+    "^DJI",   # Dow Jones Industrial Average
+    "^RUT",   # Russell 2000
+]
+
+BENCHMARK_TICKER = "^GSPC"
