@@ -4,7 +4,7 @@ from typing import Literal
 
 
 def calculate_equal_weight(
-    filtered_signal_df: pl.DataFrame,
+    portfolio_basket: pl.DataFrame,
     *,
     group_col: str = "rebalance_date",
 ) -> pl.DataFrame:
@@ -12,16 +12,16 @@ def calculate_equal_weight(
     Calculate equal portfolio weights within each group.
 
     Arguments:
-        filtered_signal_df: A ranked signal DataFrame containing only the selected stocks.
+        portfolio_basket: A ranked signal DataFrame containing only the selected stocks.
 
         group_col: The column used to define portfolio groups for weight calculation. Defaults to "rebalance_date",
             so equal weights are calculated independently for each rebalance date.
 
     Returns:
-        filtered_signal_df with an additional column: portfolio_weight.
+        portfolio_basket with an additional column: portfolio_weight.
 
     Example:
-        >>> filtered_signal_df = pl.DataFrame(
+        >>> portfolio_basket = pl.DataFrame(
         ...     {
         ...         "rebalance_date": [
         ...             date(2024, 2, 1),
@@ -33,7 +33,7 @@ def calculate_equal_weight(
         ...     }
         ... )
 
-        >>> calculate_equal_weight(filtered_signal_df)
+        >>> calculate_equal_weight(portfolio_basket)
         shape: (4, 3)
         ┌────────────────┬────────┬──────────────────┐
         │ rebalance_date │ ticker │ portfolio_weight │
@@ -48,13 +48,13 @@ def calculate_equal_weight(
 
     Note: This is a helper function used by construct_portfolio_weights.
     """
-    return filtered_signal_df.with_columns(
+    return portfolio_basket.with_columns(
         (1 / pl.len().over(group_col)).alias("portfolio_weight")
     )
 
 
 def calculate_signal_weight(
-    filtered_signal_df: pl.DataFrame,
+    portfolio_basket: pl.DataFrame,
     signal_col: str,
     *,
     group_col: str = "rebalance_date",
@@ -63,7 +63,7 @@ def calculate_signal_weight(
     Calculate signal-based portfolio weights within each group.
 
     Arguments:
-        filtered_signal_df: A ranked signal DataFrame containing only the selected stocks.
+        portfolio_basket: A ranked signal DataFrame containing only the selected stocks.
 
         signal_col: The name of the signal column for which will be to calculate the weights.
 
@@ -71,10 +71,10 @@ def calculate_signal_weight(
             so signal-based weights are calculated independently for each rebalance date.
 
     Returns:
-        filtered_signal_df with an additional column: portfolio_weight.
+        portfolio_basket with an additional column: portfolio_weight.
 
     Example:
-        >>> filtered_signal_df = pl.DataFrame(
+        >>> portfolio_basket = pl.DataFrame(
         ...     {
         ...         "rebalance_date": [
         ...             date(2024, 2, 1),
@@ -88,7 +88,7 @@ def calculate_signal_weight(
         ... )
 
         >>> calculate_signal_weight(
-        ...     filtered_signal_df=filtered_signal_df,
+        ...     portfolio_basket=portfolio_basket,
         ...     signal_col="momentum_6mo",
         ... )
         shape: (4, 4)
@@ -105,7 +105,7 @@ def calculate_signal_weight(
 
     Note: This is a helper function used by construct_portfolio_weights.
     """
-    return filtered_signal_df.with_columns(
+    return portfolio_basket.with_columns(
         (col(signal_col) / col(signal_col).sum().over(group_col)).alias(
             "portfolio_weight"
         )
@@ -113,7 +113,7 @@ def calculate_signal_weight(
 
 
 def construct_portfolio_weights(
-    filtered_signal_df: pl.DataFrame,
+    portfolio_basket: pl.DataFrame,
     weighting_method: Literal[
         "equal_weighted",
         "signal_weighted",
@@ -126,7 +126,7 @@ def construct_portfolio_weights(
     Construct portfolio weights within each group.
 
     Arguments:
-        filtered_signal_df: A ranked signal DataFrame containing only the selected stocks.
+        portfolio_basket: A ranked signal DataFrame containing only the selected stocks.
 
         weighting_method: The method used for constructing portfolio weights.
 
@@ -140,12 +140,12 @@ def construct_portfolio_weights(
 
     Example:
         >>> equal_weighted = construct_portfolio_weights(
-        ...     filtered_signal_df=filtered_signal_df,
+        ...     portfolio_basket=portfolio_basket,
         ...     weighting_method="equal_weighted",
         ... )
 
         >>> signal_weighted = construct_portfolio_weights(
-        ...     filtered_signal_df=filtered_signal_df,
+        ...     portfolio_basket=portfolio_basket,
         ...     weighting_method="signal_weighted",
         ...     signal_col="momentum_6mo",
         ... )
@@ -156,11 +156,11 @@ def construct_portfolio_weights(
         True
 
     Returns:
-        filtered_signal_df with an additional column: portfolio_weight.
+        portfolio_basket with an additional column: portfolio_weight.
     """
     if weighting_method == "equal_weighted":
         return calculate_equal_weight(
-            filtered_signal_df,
+            portfolio_basket,
             group_col=group_col,
         )
 
@@ -171,7 +171,7 @@ def construct_portfolio_weights(
             )
 
         return calculate_signal_weight(
-            filtered_signal_df,
+            portfolio_basket,
             signal_col,
             group_col=group_col,
         )

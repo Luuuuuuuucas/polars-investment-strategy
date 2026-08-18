@@ -84,27 +84,27 @@ def rank_signal(
     )
 
 
-def filter_top_ranked(
-    ranked_signal_df: pl.DataFrame, rank_col: str, top_n: int
+def filter_ranked_candidates(
+    ranked_signal_df: pl.DataFrame, rank_col: str, rank_buffer: int
 ) -> pl.DataFrame:
     """
-    Keep stocks with rank values less than or equal to top_n for each signal date.
+    Keep stocks with rank values less than or equal to rank_buffer for each signal date.
 
     Arguments:
         ranked_signal_df: signal DataFrame with an additional rank column.
 
         rank_col: The column name of the rank column.
 
-        top_n: The number of the highest ranked stocks to be filtered.
-    
+        rank_buffer: The number of the highest ranked stocks to be filtered.
+
     Returns:
-        ranked_signal_df with only top_n stocks kept in each signal date.
+        ranked_signal_df with only rank_buffer stocks kept in each signal date.
 
     Example:
-        >>> filtered = filter_top_ranked(
+        >>> filtered = filter_ranked_candidates(
         ...     ranked_signal_df=ranked,
         ...     rank_col="momentum_6mo_rank",
-        ...     top_n=2,
+        ...     rank_buffer=2,
         ... )
 
         >>> filtered.select(
@@ -124,17 +124,16 @@ def filter_top_ranked(
         │ 2024-02-29  │ B      │ 0.25         │ 1                 │
         │ 2024-02-29  │ C      │ 0.10         │ 2                 │
         └─────────────┴────────┴──────────────┴───────────────────┘
-    
     """
-    return ranked_signal_df.filter(col(rank_col) <= top_n)
+    return ranked_signal_df.filter(col(rank_col) <= rank_buffer)
 
 
-def sort_rankings(filtered_signal_df: pl.DataFrame, rank_col: str) -> pl.DataFrame:
+def sort_rankings(ranked_signal_df: pl.DataFrame, rank_col: str) -> pl.DataFrame:
     """
-    Sort the filtered signal DataFrame by signal date and rank.
+    Sort the signal DataFrame by signal date and rank.
 
     Arguments:
-        filtered_signal_df: A ranked signal DataFrame containing only the selected stocks.
+        ranked_signal_df: signal DataFrame with an additional rank column.
 
         rank_col: The name of the rank column used for sorting.
 
@@ -143,7 +142,7 @@ def sort_rankings(filtered_signal_df: pl.DataFrame, rank_col: str) -> pl.DataFra
 
     Example:
         >>> sorted_rankings = sort_rankings(
-        ...     filtered_signal_df=filtered,
+        ...     ranked_signal_df=ranked_signal_df,
         ...     rank_col="momentum_6mo_rank",
         ... )
 
@@ -167,4 +166,4 @@ def sort_rankings(filtered_signal_df: pl.DataFrame, rank_col: str) -> pl.DataFra
     Note:
         This function is intended for visualization purposes only.
     """
-    return filtered_signal_df.sort(["signal_date", rank_col])
+    return ranked_signal_df.sort(["signal_date", rank_col])
