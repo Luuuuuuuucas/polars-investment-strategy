@@ -83,8 +83,6 @@ def create_momentum_date_mapping(
       so the realized lookback period is never shorter than requested.
     - Theoretical lag base dates are aligned to the most recent trading date on or before the target date,
       so the realized lookback period is never shorter than requested.
-    - The first rebalance date represents the initial portfolio formation.
-    - Subsequent rebalance dates represent periodic portfolio rebalancing.
     - This is a helper function for calculate_momentum and calculate_risk_adjusted_momentum.
     """
     target_lookback_dates = date_mapping_df.select(
@@ -120,6 +118,103 @@ def create_momentum_date_mapping(
         col("lag_base_date"),
         col("signal_date"),
         col("rebalance_date"),
+    )
+
+
+def create_st_reversal_date_mapping(
+    date_mapping_df: pl.DataFrame,
+    trading_calendar: pl.DataFrame,
+) -> pl.DataFrame:
+    """
+    Define lag base dates and short-term reversal dates.
+    Create a date-mapping Polars DataFrame mapping lag base dates, short-term reversal dates, and signal dates
+    to the corresponding rebalance dates.
+
+    Arguments:
+        date_mapping_df: A Polars DataFrame containing columns: signal_date, rebalance_date.
+
+        trading_calendar: A Polars DataFrame containing one row per unique trading date.
+
+    Returns:
+        A Polars DataFrame containing columns: lag_base_date, short-term reversal dates ,signal_date,
+            rebalance_date.
+
+    Example:
+        >>> date_mapping_df = pl.DataFrame(
+        ...     {
+        ...         "signal_date": [
+        ...             date(2025, 12, 31),
+        ...             date(2026, 1, 30),
+        ...         ],
+        ...         "rebalance_date": [
+        ...             date(2026, 1, 2),
+        ...             date(2026, 2, 2),
+        ...         ],
+        ...     }
+        ... )
+
+        >>> trading_calendar = pl.DataFrame(
+        ...     {
+        ...         "date": [
+        ...             date(2025, 11, 28),
+        ...             date(2025, 12, 1),
+        ...             date(2025, 12, 30),
+        ...             date(2025, 12, 31),
+        ...             date(2026, 1, 2),
+        ...             date(2026, 1, 27),
+        ...             date(2026, 1, 28),
+        ...             date(2026, 1, 30),
+        ...             date(2026, 2, 2),
+        ...         ]
+        ...     }
+        ... ).sort("date")
+
+        >>> st_reversal_date_mapping = create_st_reversal_date_mapping(
+        ...     date_mapping_df=date_mapping_df,
+        ...     trading_calendar=trading_calendar,
+        ... )
+
+        >>> st_reversal_date_mapping
+        shape: (2, 3)
+        ┌──────────────────┬─────────────┬────────────────┐
+        │ st_reversal_date ┆ signal_date ┆ rebalance_date │
+        │ ---              ┆ ---         ┆ ---            │
+        │ date             ┆ date        ┆ date           │
+        ╞══════════════════╪═════════════╪════════════════╡
+        │ 2025-12-01       ┆ 2025-12-31  ┆ 2026-01-02     │
+        │ 2025-12-31       ┆ 2026-01-30  ┆ 2026-02-02     │
+        └──────────────────┴─────────────┴────────────────┘
+
+    Note:
+    - Theoretical rebalance dates are aligned to the next available trading date.
+    - Theoretical lag base dates are aligned to the most recent trading date on or before the target date,
+      so the realized lookback period is never shorter than requested.
+    - Short-term reversal is calculated using the return from the first trading day after lag_base_date to
+      signal_date, ensuring that its estimation window does not overlap with the momentum factor.
+    - This is a helper function for calculate_st_reversal.
+    """
+    target_lag_base_dates = date_mapping_df.select(
+        col("signal_date").dt.offset_by("-1mo").alias("target_date")
+    )
+
+    lag_base_dates = target_lag_base_dates.join_asof(
+        trading_calendar, left_on="target_date", right_on="date", strategy="backward"
+    ).select(col("date").alias("lag_base_date"))
+
+    return (
+        pl.concat([lag_base_dates, date_mapping_df], how="horizontal")
+        .join(
+            trading_calendar.with_columns(
+                col("date").shift(-1).alias("st_reversal_date"),
+            ),
+            left_on="lag_base_date",
+            right_on="date",
+        )
+        .select(
+            col("st_reversal_date"),
+            col("signal_date"),
+            col("rebalance_date"),
+        )
     )
 
 
@@ -232,10 +327,10 @@ def get_prices_for_momentum_date_mapping(
         │ 2025-07-30    ┆ 2025-12-30    ┆ 2026-01-30  ┆ 2026-02-02     ┆ MSFT   ┆ 360.0          ┆ 410.0          ┆ 430.0        ┆ 432.0          │
         └───────────────┴───────────────┴─────────────┴────────────────┴────────┴────────────────┴────────────────┴──────────────┴────────────────┘
 
-        Note:
-        - The column order in the actual output may differ from the example, but the order does not
-          affect the resulting data or subsequent calculations.
-        - This is a helper function for calculate_momentum and calculate_risk_adjusted_momentum.
+    Note:
+    - The column order in the actual output may differ from the example, but the order does not
+        affect the resulting data or subsequent calculations.
+    - This is a helper function for calculate_momentum and calculate_risk_adjusted_momentum.
     """
     lag_base_table = cleaned_close_prices_dataset.join(
         momentum_date_mapping_df,
@@ -277,6 +372,124 @@ def get_prices_for_momentum_date_mapping(
             how="left",
             maintain_order="left",
         )
+    )
+
+
+def get_prices_for_st_reversal_date_mapping(
+    factor_reference_table: pl.DataFrame,
+    st_reversal_date_mapping_df: pl.DataFrame,
+    cleaned_close_prices_dataset: pl.DataFrame,
+) -> pl.DataFrame:
+    """
+    Add short-term reversal dates with close prices in additional to factor_reference_table.
+
+    Arguments:
+        factor_reference_table: A Polars DataFrame containing columns: signal_date, rebalance_date, ticker,
+            signal_close, rebalance_open.
+
+        st_reversal_date_mapping_df: A Polars DataFrame containing columns: st_reversal_date, signal_date,
+            rebalance_date.
+
+        cleaned_close_prices_dataset: A cleaned Polars DataFrame containing columns: date, ticker, close.
+
+    Returns:
+        A Polars DataFrame containing columns: st_reversal_date, signal_date, rebalance_date, ticker,
+            st_reversal_close, signal_close, rebalance_open.
+
+    Example:
+        >>> factor_reference_table = pl.DataFrame(
+        ...     {
+        ...         "signal_date": [
+        ...             date(2025, 12, 31),
+        ...             date(2025, 12, 31),
+        ...             date(2026, 1, 30),
+        ...             date(2026, 1, 30),
+        ...         ],
+        ...         "rebalance_date": [
+        ...             date(2026, 1, 2),
+        ...             date(2026, 1, 2),
+        ...             date(2026, 2, 2),
+        ...             date(2026, 2, 2),
+        ...         ],
+        ...         "ticker": ["AAPL", "MSFT", "AAPL", "MSFT"],
+        ...         "signal_close": [250.0, 420.0, 255.0, 430.0],
+        ...         "rebalance_open": [251.0, 422.0, 256.0, 432.0],
+        ...     }
+        ... )
+
+        >>> st_reversal_date_mapping_df = pl.DataFrame(
+        ...     {
+        ...         "st_reversal_date": [
+        ...             date(2025, 12, 1),
+        ...             date(2025, 12, 31),
+        ...         ],
+        ...         "signal_date": [
+        ...             date(2025, 12, 31),
+        ...             date(2026, 1, 30),
+        ...         ],
+        ...         "rebalance_date": [
+        ...             date(2026, 1, 2),
+        ...             date(2026, 2, 2),
+        ...         ],
+        ...     }
+        ... )
+
+        >>> cleaned_close_prices_dataset = pl.DataFrame(
+        ...     {
+        ...         "date": [
+        ...             date(2025, 12, 1),
+        ...             date(2025, 12, 1),
+        ...             date(2025, 12, 31),
+        ...             date(2025, 12, 31),
+        ...         ],
+        ...         "ticker": ["AAPL", "MSFT", "AAPL", "MSFT"],
+        ...         "close": [240.0, 400.0, 250.0, 420.0],
+        ...     }
+        ... )
+
+        >>> st_reversal_reference_table = get_prices_for_st_reversal_date_mapping(
+        ...     factor_reference_table=factor_reference_table,
+        ...     st_reversal_date_mapping_df=st_reversal_date_mapping_df,
+        ...     cleaned_close_prices_dataset=cleaned_close_prices_dataset,
+        ... )
+
+        >>> st_reversal_reference_table
+        shape: (4, 7)
+        ┌─────────────┬────────────────┬────────┬──────────────┬────────────────┬──────────────────┬───────────────────┐
+        │ signal_date ┆ rebalance_date ┆ ticker ┆ signal_close ┆ rebalance_open ┆ st_reversal_date ┆ st_reversal_close │
+        │ ---         ┆ ---            ┆ ---    ┆ ---          ┆ ---            ┆ ---              ┆ ---               │
+        │ date        ┆ date           ┆ str    ┆ f64          ┆ f64            ┆ date             ┆ f64               │
+        ╞═════════════╪════════════════╪════════╪══════════════╪════════════════╪══════════════════╪═══════════════════╡
+        │ 2025-12-31  ┆ 2026-01-02     ┆ AAPL   ┆ 250.0        ┆ 251.0          ┆ 2025-12-01       ┆ 240.0             │
+        │ 2025-12-31  ┆ 2026-01-02     ┆ MSFT   ┆ 420.0        ┆ 422.0          ┆ 2025-12-01       ┆ 400.0             │
+        │ 2026-01-30  ┆ 2026-02-02     ┆ AAPL   ┆ 255.0        ┆ 256.0          ┆ 2025-12-31       ┆ 250.0             │
+        │ 2026-01-30  ┆ 2026-02-02     ┆ MSFT   ┆ 430.0        ┆ 432.0          ┆ 2025-12-31       ┆ 420.0             │
+        └─────────────┴────────────────┴────────┴──────────────┴────────────────┴──────────────────┴───────────────────┘
+
+    Note:
+    - The column order in the actual output may differ from the example, but the order does not
+        affect the resulting data or subsequent calculations.
+    - This is a helper function for calculate_st_reversal.
+
+    """
+    st_reversal_table = cleaned_close_prices_dataset.join(
+        st_reversal_date_mapping_df,
+        left_on="date",
+        right_on="st_reversal_date",
+        how="semi",
+        maintain_order="left",
+    ).rename({"date": "st_reversal_date", "close": "st_reversal_close"})
+
+    return factor_reference_table.join(
+        st_reversal_date_mapping_df,
+        on=["rebalance_date", "signal_date"],
+        how="left",
+        maintain_order="left",
+    ).join(
+        st_reversal_table,
+        on=["st_reversal_date", "ticker"],
+        how="left",
+        maintain_order="left",
     )
 
 
@@ -412,7 +625,7 @@ def calculate_momentum(
     - The column order in the actual output may differ from the example, but the order does not
       affect the resulting data or subsequent calculations.
     - This function is designed to support sequential factor construction. Existing columns are
-      preserved, and the risk-adjusted momentum factor is appended as a new column.
+      preserved, and the momentum factor is appended as a new column.
     """
     momentum_date_mapping_df = create_momentum_date_mapping(
         date_mapping_df=date_mapping_df,
@@ -473,7 +686,7 @@ def calculate_risk_adjusted_momentum(
     Returns:
         The input DataFrame with an additional column:
             risk_adjusted_momentum_{lookback_period_for_total_returns}{lookback_period_unit}.
-    
+
     Example:
         >>> factor_reference_table = pl.DataFrame(
         ...     {
@@ -630,4 +843,140 @@ def calculate_risk_adjusted_momentum(
         on=["signal_date", "ticker"],
         how="left",
         maintain_order="left",
+    )
+
+
+def calculate_st_reversal(
+    factor_reference_table: pl.DataFrame,
+    cleaned_close_prices_dataset: pl.DataFrame,
+    date_mapping_df: pl.DataFrame,
+    trading_calendar: pl.DataFrame,
+) -> pl.DataFrame:
+    """
+    Calculate short-term reversal.
+
+    Arguments:
+        factor_reference_table: A Polars DataFrame containing columns: signal_date, rebalance_date, ticker,
+            signal_close, rebalance_open.
+
+        cleaned_close_prices_dataset: A cleaned Polars DataFrame containing columns: date, ticker, close.
+
+        date_mapping_df: A Polars DataFrame containing columns: signal_date, rebalance_date.
+
+        trading_calendar: A Polars DataFrame containing one row per unique trading date.
+
+    Returns:
+        The input DataFrame with an additional column: st_reversal.
+
+    Example:
+        >>> factor_reference_table = pl.DataFrame(
+        ...     {
+        ...         "signal_date": [
+        ...             date(2025, 12, 31),
+        ...             date(2025, 12, 31),
+        ...             date(2026, 1, 30),
+        ...             date(2026, 1, 30),
+        ...         ],
+        ...         "rebalance_date": [
+        ...             date(2026, 1, 2),
+        ...             date(2026, 1, 2),
+        ...             date(2026, 2, 2),
+        ...             date(2026, 2, 2),
+        ...         ],
+        ...         "ticker": ["AAPL", "MSFT", "AAPL", "MSFT"],
+        ...         "signal_close": [250.0, 420.0, 255.0, 430.0],
+        ...         "rebalance_open": [251.0, 422.0, 256.0, 432.0],
+        ...     }
+        ... )
+
+        >>> cleaned_close_prices_dataset = pl.DataFrame(
+        ...     {
+        ...         "date": [
+        ...             date(2025, 12, 1),
+        ...             date(2025, 12, 1),
+        ...             date(2025, 12, 31),
+        ...             date(2025, 12, 31),
+        ...         ],
+        ...         "ticker": ["AAPL", "MSFT", "AAPL", "MSFT"],
+        ...         "close": [240.0, 400.0, 250.0, 420.0],
+        ...     }
+        ... )
+
+        >>> date_mapping_df = pl.DataFrame(
+        ...     {
+        ...         "signal_date": [
+        ...             date(2025, 12, 31),
+        ...             date(2026, 1, 30),
+        ...         ],
+        ...         "rebalance_date": [
+        ...             date(2026, 1, 2),
+        ...             date(2026, 2, 2),
+        ...         ],
+        ...     }
+        ... )
+
+        >>> trading_calendar = pl.DataFrame(
+        ...     {
+        ...         "date": [
+        ...             date(2025, 11, 28),
+        ...             date(2025, 12, 1),
+        ...             date(2025, 12, 30),
+        ...             date(2025, 12, 31),
+        ...             date(2026, 1, 2),
+        ...             date(2026, 1, 27),
+        ...             date(2026, 1, 28),
+        ...             date(2026, 1, 30),
+        ...             date(2026, 2, 2),
+        ...         ]
+        ...     }
+        ... ).sort("date")
+
+        >>> factor_reference_table = calculate_st_reversal(
+        ...     factor_reference_table=factor_reference_table,
+        ...     cleaned_close_prices_dataset=cleaned_close_prices_dataset,
+        ...     date_mapping_df=date_mapping_df,
+        ...     trading_calendar=trading_calendar,
+        ... )
+
+        >>> factor_reference_table
+        shape: (4, 6)
+        ┌─────────────┬────────────────┬────────┬──────────────┬────────────────┬─────────────┐
+        │ signal_date ┆ rebalance_date ┆ ticker ┆ signal_close ┆ rebalance_open ┆ st_reversal │
+        │ ---         ┆ ---            ┆ ---    ┆ ---          ┆ ---            ┆ ---         │
+        │ date        ┆ date           ┆ str    ┆ f64          ┆ f64            ┆ f64         │
+        ╞═════════════╪════════════════╪════════╪══════════════╪════════════════╪═════════════╡
+        │ 2025-12-31  ┆ 2026-01-02     ┆ AAPL   ┆ 250.0        ┆ 251.0          ┆ -0.041667   │
+        │ 2025-12-31  ┆ 2026-01-02     ┆ MSFT   ┆ 420.0        ┆ 422.0          ┆ -0.050000   │
+        │ 2026-01-30  ┆ 2026-02-02     ┆ AAPL   ┆ 255.0        ┆ 256.0          ┆ -0.020000   │
+        │ 2026-01-30  ┆ 2026-02-02     ┆ MSFT   ┆ 430.0        ┆ 432.0          ┆ -0.023810   │
+        └─────────────┴────────────────┴────────┴──────────────┴────────────────┴─────────────┘
+
+    Note:
+    - The column order in the actual output may differ from the example, but the order does not
+      affect the resulting data or subsequent calculations.
+    - Short-term reversal is measured over approximately one month, from the first trading day
+      after the momentum lag base date through the signal date. This ensures that the
+      short-term reversal estimation window does not overlap with the momentum estimation window.
+    - This function is designed to support sequential factor construction. Existing columns are
+      preserved, and the short-term reversal factor is appended as a new column.
+    """
+    st_reversal_date_mapping_df = create_st_reversal_date_mapping(
+        date_mapping_df=date_mapping_df,
+        trading_calendar=trading_calendar,
+    )
+
+    st_reversal_reference_table = get_prices_for_st_reversal_date_mapping(
+        factor_reference_table=factor_reference_table,
+        st_reversal_date_mapping_df=st_reversal_date_mapping_df,
+        cleaned_close_prices_dataset=cleaned_close_prices_dataset,
+    )
+
+    st_reversal = st_reversal_reference_table.select(
+        col("signal_date"),
+        col("ticker"),
+        (-(col("signal_close") / col("st_reversal_close") - 1)).alias("st_reversal"),
+    )
+
+    return factor_reference_table.join(
+        st_reversal, on=["signal_date", "ticker"], how="left", maintain_order="left"
     )

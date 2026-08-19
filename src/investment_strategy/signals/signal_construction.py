@@ -163,7 +163,7 @@ def create_date_mapping(
     ).select(col("date").alias("rebalance_date"))
 
     return rebalance_dates.join(
-        trading_calendar.sort("date").with_columns(
+        trading_calendar.with_columns(
             col("date").shift(1).alias("signal_date")
         ),
         left_on="rebalance_date",
